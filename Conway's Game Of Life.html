@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Conway's Game of Life</title>
+  <style>
+    :root {
+      --bg-color: #0f172a;
+      --panel-bg: #1e293b;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --border: #334155;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    header h1 {
+      font-size: 2rem;
+      color: var(--accent);
+      margin-bottom: 6px;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .controls-panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      justify-content: center;
+      align-items: center;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
+      margin-bottom: 20px;
+      max-width: 900px;
+      width: 100%;
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      background: var(--border);
+      color: var(--text);
+      border: none;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s, transform 0.1s;
+    }
+
+    button:hover {
+      background: #475569;
+    }
+
+    button:active {
+      transform: scale(0.98);
+    }
+
+    button.primary {
+      background: var(--accent);
+      color: #0f172a;
+    }
+
+    button.primary:hover {
+      background: var(--accent-hover);
+    }
+
+    label {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    select {
+      background: var(--border);
+      color: var(--text);
+      border: 1px solid transparent;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 0.85rem;
+      cursor: pointer;
+      outline: none;
+    }
+
+    .stats {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      min-width: 120px;
+    }
+
+    .canvas-container {
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      background: #020617;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+    }
+
+    canvas {
+      display: block;
+      cursor: crosshair;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Conway's Game of Life</h1>
+    <p>Click/drag to toggle cells. Press <strong>Start</strong> or <strong>Spacebar</strong> to simulate.</p>
+  </header>
+
+  <div class="controls-panel">
+    <div class="btn-group">
+      <button id="startPauseBtn" class="primary">Start</button>
+      <button id="stepBtn">Step</button>
+      <button id="clearBtn">Clear</button>
+      <button id="randomBtn">Random</button>
+    </div>
+
+    <div class="control-group">
+      <label for="gridSize">Grid Size:</label>
+      <select id="gridSize">
+        <option value="30">Small (30x30)</option>
+        <option value="50" selected>Medium (50x50)</option>
+        <option value="80">Large (80x80)</option>
+        <option value="100">Extra Large (100x100)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="speedSlider">Speed: <span id="speedVal">15</span> fps</label>
+      <input type="range" id="speedSlider" min="1" max="60" value="15" />
+    </div>
+
+    <div class="stats">
+      <div>Gen: <strong id="genCount">0</strong></div>
+      <div>Alive: <strong id="aliveCount">0</strong></div>
+    </div>
+  </div>
+
+  <div class="canvas-container">
+    <canvas id="lifeCanvas" width="600" height="600"></canvas>
+  </div>
+
+  <script>
+    // --- Canvas & Simulation State ---
+    const canvas = document.getElementById('lifeCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Controls & Elements
+    const startPauseBtn = document.getElementById('startPauseBtn');
+    const stepBtn = document.getElementById('stepBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const randomBtn = document.getElementById('randomBtn');
+    const gridSizeSelect = document.getElementById('gridSize');
+    const speedSlider = document.getElementById('speedSlider');
+    const speedVal = document.getElementById('speedVal');
+    const genCountEl = document.getElementById('genCount');
+    const aliveCountEl = document.getElementById('aliveCount');
+
+    let rows = parseInt(gridSizeSelect.value, 10);
+    let cols = rows;
+    let cellSize = canvas.width / cols;
+
+    let grid = createGrid(rows, cols);
+    let isRunning = false;
+    let fps = parseInt(speedSlider.value, 10);
+    let lastFrameTime = 0;
+    let animationFrameId = null;
+
+    let generation = 0;
+    let isDrawing = false;
+    let drawMode = 1; // 1 = make alive, 0 = kill
+
+    // Colors
+    const ALIVE_COLOR = '#38bdf8';
+    const DEAD_COLOR = '#020617';
+    const GRID_COLOR = '#1e293b';
+
+    // --- Grid Operations ---
+    function createGrid(r, c) {
+      return Array.from({ length: r }, () => new Uint8Array(c));
+    }
+
+    function countNeighbors(grid, x, y) {
+      let count = 0;
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          if (i === 0 && j === 0) continue;
+          
+          // Toroidal wrap-around boundaries
+          const ni = (x + i + rows) % rows;
+          const nj = (y + j + cols) % cols;
+          count += grid[ni][nj];
+        }
+      }
+      return count;
+    }
+
+    function computeNextGeneration() {
+      const nextGrid = createGrid(rows, cols);
+      let aliveCount = 0;
+
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const neighbors = countNeighbors(grid, r, c);
+          const isAlive = grid[r][c] === 1;
+
+          // Conway's Rules:
+          // 1. Live cell with < 2 neighbours dies (underpopulation).
+          // 2. Live cell with 2 or 3 neighbours lives (survival).
+          // 3. Live cell with > 3 neighbours dies (overpopulation).
+          // 4. Dead cell with exactly 3 neighbours becomes alive (reproduction).
+          if (isAlive && (neighbors === 2 || neighbors === 3)) {
+            nextGrid[r][c] = 1;
+            aliveCount++;
+          } else if (!isAlive && neighbors === 3) {
+            nextGrid[r][c] = 1;
+            aliveCount++;
+          }
+        }
+      }
+
+      grid = nextGrid;
+      generation++;
+      updateStats(aliveCount);
+    }
+
+    function countAliveCells() {
+      let count = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (grid[r][c]) count++;
+        }
+      }
+      return count;
+    }
+
+    function updateStats(alive = countAliveCells()) {
+      genCountEl.textContent = generation;
+      aliveCountEl.textContent = alive;
+    }
+
+    // --- Rendering ---
+    function render() {
+      ctx.fillStyle = DEAD_COLOR;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = ALIVE_COLOR;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if (grid[r][c] === 1) {
+            ctx.fillRect(c * cellSize, r * cellSize, cellSize - 1, cellSize - 1);
+          }
+        }
+      }
+
+      // Draw subtle grid lines
+      ctx.strokeStyle = GRID_COLOR;
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i <= cols; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * cellSize, 0);
+        ctx.lineTo(i * cellSize, canvas.height);
+        ctx.stroke();
+      }
+      for (let j = 0; j <= rows; j++) {
+        ctx.beginPath();
+        ctx.moveTo(0, j * cellSize);
+        ctx.lineTo(canvas.width, j * cellSize);
+        ctx.stroke();
+      }
+    }
+
+    // --- Animation Loop ---
+    function loop(currentTime) {
+      if (!isRunning) return;
+
+      const delta = currentTime - lastFrameTime;
+      const interval = 1000 / fps;
+
+      if (delta >= interval) {
+        lastFrameTime = currentTime - (delta % interval);
+        computeNextGeneration();
+        render();
+      }
+
+      animationFrameId = requestAnimationFrame(loop);
+    }
+
+    function startSimulation() {
+      if (!isRunning) {
+        isRunning = true;
+        startPauseBtn.textContent = 'Pause';
+        startPauseBtn.classList.remove('primary');
+        lastFrameTime = performance.now();
+        animationFrameId = requestAnimationFrame(loop);
+      }
+    }
+
+    function pauseSimulation() {
+      if (isRunning) {
+        isRunning = false;
+        startPauseBtn.textContent = 'Start';
+        startPauseBtn.classList.add('primary');
+        cancelAnimationFrame(animationFrameId);
+      }
+    }
+
+    // --- Mouse & Touch Interaction ---
+    function getCellCoords(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+      const clientY = e.clientY || (e.touches && e.touches[0].clientY);
+
+      const x = Math.floor((clientX - rect.left) * scaleX / cellSize);
+      const y = Math.floor((clientY - rect.top) * scaleY / cellSize);
+
+      return {
+        r: Math.max(0, Math.min(rows - 1, y)),
+        c: Math.max(0, Math.min(cols - 1, x))
+      };
+    }
+
+    function applyDrawing(e) {
+      const { r, c } = getCellCoords(e);
+      grid[r][c] = drawMode;
+      updateStats();
+      render();
+    }
+
+    canvas.addEventListener('mousedown', (e) => {
+      isDrawing = true;
+      const { r, c } = getCellCoords(e);
+      drawMode = grid[r][c] === 1 ? 0 : 1;
+      grid[r][c] = drawMode;
+      updateStats();
+      render();
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isDrawing) applyDrawing(e);
+    });
+
+    window.addEventListener('mouseup', () => {
+      isDrawing = false;
+    });
+
+    // --- Controls Listeners ---
+    startPauseBtn.addEventListener('click', () => {
+      if (isRunning) pauseSimulation();
+      else startSimulation();
+    });
+
+    stepBtn.addEventListener('click', () => {
+      if (!isRunning) {
+        computeNextGeneration();
+        render();
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      pauseSimulation();
+      grid = createGrid(rows, cols);
+      generation = 0;
+      updateStats();
+      render();
+    });
+
+    randomBtn.addEventListener('click', () => {
+      pauseSimulation();
+      generation = 0;
+      let aliveCount = 0;
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          grid[r][c] = Math.random() > 0.8 ? 1 : 0;
+          if (grid[r][c]) aliveCount++;
+        }
+      }
+      updateStats(aliveCount);
+      render();
+    });
+
+    gridSizeSelect.addEventListener('change', (e) => {
+      pauseSimulation();
+      rows = parseInt(e.target.value, 10);
+      cols = rows;
+      cellSize = canvas.width / cols;
+      grid = createGrid(rows, cols);
+      generation = 0;
+      updateStats();
+      render();
+    });
+
+    speedSlider.addEventListener('input', (e) => {
+      fps = parseInt(e.target.value, 10);
+      speedVal.textContent = fps;
+    });
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        startPauseBtn.click();
+      } else if (e.code === 'KeyS' && !isRunning) {
+        stepBtn.click();
+      } else if (e.code === 'KeyC') {
+        clearBtn.click();
+      }
+    });
+
+    // Initial Render
+    render();
+    updateStats();
+  </script>
+</body>
+</html>
